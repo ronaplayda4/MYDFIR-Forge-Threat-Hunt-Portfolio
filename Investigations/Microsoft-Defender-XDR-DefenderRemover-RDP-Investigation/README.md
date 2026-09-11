@@ -4,11 +4,13 @@
 
 This investigation was performed in an isolated MYDFIR lab environment using Microsoft Defender XDR.
 
-The investigation began by reviewing the process tree and related endpoint activity. Suspicious execution involving `DefenderRemover.exe` was identified, followed by registry changes affecting Microsoft Defender security settings.
+The investigation began after Microsoft Defender XDR generated alerts related to attempts to disable Microsoft Defender Antivirus protections on `mts-dc.mts.local`.
 
-I then pivoted from the process evidence into Advanced Hunting to correlate process, registry, logon, and network activity.
+The investigation focused on determining what activity occurred before and after the security-control modification. Microsoft Defender XDR Advanced Hunting was used to correlate remote logon activity, suspicious process execution, child-process activity, registry changes, and external threat-intelligence results.
 
-The combined evidence showed remote access to the affected system followed by activity that attempted to weaken Microsoft Defender protections.
+The evidence showed remote interactive logon activity involving the `mts\administrator` account followed by execution of `DefenderRemover.exe`, additional command and PowerShell activity, and registry deletion activity involving `RemoveDefender.reg`.
+
+**Verdict:** True Positive – Malicious Activity
 
 ---
 
@@ -18,239 +20,285 @@ The combined evidence showed remote access to the affected system followed by ac
 
 **Affected Account:** `mts\administrator`
 
-**Primary Suspicious Activity:**
-- Remote access to the affected device
-- Execution of DefenderRemover-related activity
-- Microsoft Defender registry modifications
-- Multiple Defender security controls set to disabled
-- Registry key deletion activity
-- Suspicious remote IP activity
+**Primary Findings:**
 
-**Verdict:** True Positive – Malicious Activity
-
----
-
-## Initial Process Analysis
-
-The investigation began with the Microsoft Defender XDR process tree.
-
-Process activity showed `DefenderRemover.exe` associated with the `administrator` account. The process evidence provided the initial lead for determining what occurred on the endpoint.
-
-Additional process activity showed scripts and child processes associated with the suspicious execution chain.
-
-This evidence was used as the starting point before pivoting into Advanced Hunting for deeper correlation.
+- Microsoft Defender XDR generated high-severity alerts for attempts to turn off Microsoft Defender Antivirus protection.
+- RemoteInteractive logon activity was observed for the `mts\administrator` account.
+- `DefenderRemover.exe` executed under the administrator account.
+- The executable ran with elevated privileges.
+- Additional command-line and PowerShell-related child processes were observed.
+- Registry deletion activity was performed using `RemoveDefender.reg`.
+- VirusTotal provided strong supporting reputation evidence for `DefenderRemover.exe`.
 
 ---
 
-## Registry Modification Evidence
+## 1. Initial Alert
 
-Advanced Hunting identified `regedit.exe` importing the following registry file:
+Microsoft Defender XDR showed multiple alerts associated with attempts to turn off Microsoft Defender Antivirus protection on `mts-dc.mts.local`.
 
-`Remove_defender\RemoveDefender.reg`
+The selected alert was classified as **High severity** and mapped by Microsoft Defender to defense-evasion activity. The incident graph also showed relationships between the affected device, users, processes, files, registry values, and network activity.
 
-The activity occurred under the `administrator` account.
+This alert provided the starting point for the investigation.
 
-Multiple Windows Defender registry values were modified.
-
-Examples included:
-
-- `DisableIOAVProtection = 1`
-- `DisableRealtimeMonitoring = 1`
-- `DisableBehaviorMonitoring = 1`
-- `DisableAntiSpyware = 1`
-- `DisableScanningNetworkFiles = 1`
-
-These changes are significant because they weaken or disable Microsoft Defender security protections.
-
-Registry deletion activity associated with the same operation was also identified.
+> **Evidence:** Microsoft Defender XDR incident / attack story showing the Defender Antivirus protection alert.
 
 ---
 
-## Logon Correlation
+## 2. Remote Logon Analysis
 
-I next reviewed `DeviceLogonEvents` for the `administrator` account around the suspicious activity.
+Advanced Hunting was used to review authentication activity involving the affected system and administrator account.
 
-The hunting results identified successful network and RemoteInteractive activity associated with two remote IP addresses:
+The results showed multiple successful logon events associated with `mts\administrator`, including `RemoteInteractive` activity. Remote IP addresses observed in the logon telemetry included:
 
 - `131.109.131.82`
 - `173.255.162.181`
 
-The events included:
+The presence of these addresses in the telemetry establishes that they were observed during authentication activity. The logon data alone does not establish that every observed IP address was malicious.
 
-- `LogonSuccess`
-- `RemoteInteractive`
-- `Unlock`
-- Network logons
+### RDP / RemoteInteractive Evidence
 
-The remote logon activity occurred shortly before the Defender registry modifications.
+![RemoteInteractive logon activity](images/rdp-remoteinteractive-logons.png)
 
----
-
-## Network / RDP Correlation
-
-The investigation was then pivoted into `DeviceNetworkEvents`.
-
-A network event showed:
-
-**Source / Remote IP:** `173.255.162.181`
-
-**Destination Device:** `mts-dc.mts.local`
-
-**Destination IP:** `192.168.10.8`
-
-**Destination Port:** `3389`
-
-**Protocol:** TCP
-
-**Action:** `InboundConnectionAccepted`
-
-**Process:** `svchost.exe`
-
-**Command Line:** `svchost.exe -k termsvcs -s TermService`
-
-Port `3389` and the Windows Terminal Services process provide evidence consistent with an accepted RDP connection to the affected device.
-
-This network evidence correlated with the RemoteInteractive logon activity observed in `DeviceLogonEvents`.
+The RemoteInteractive events were important because they provided authentication-level evidence that could be correlated with the suspicious endpoint activity that followed.
 
 ---
 
-## IP Reputation Analysis
+## 3. DefenderRemover Execution
 
-The remote IP addresses were reviewed using external threat-intelligence sources.
+Advanced Hunting identified execution of `DefenderRemover.exe` under the `administrator` account.
 
-### 131.109.131.82
+The process telemetry showed:
 
-VirusTotal showed multiple security vendors flagging this IP as malicious, suspicious, phishing-related, or malware-related at the time of the investigation.
+- **File:** `DefenderRemover.exe`
+- **Account:** `administrator`
+- **Initiating Process:** `explorer.exe`
+- **Process ID:** `8140`
+- **Initiating Process ID:** `6604`
 
-WHOIS information was also reviewed to understand the registered network allocation.
+### Process Evidence
 
-WHOIS registration information alone does not identify the individual responsible for the activity and was therefore treated only as contextual evidence.
+![DefenderRemover process activity](images/defenderremover-explorer-process.png)
 
-### 173.255.162.181
-
-This IP was directly associated with the accepted inbound RDP connection observed in Defender XDR.
-
-Threat-intelligence results for this IP were not treated as proof of maliciousness by themselves. The stronger evidence was its direct correlation with the RDP and logon telemetry.
-
----
-
-## Evidence Correlation
-
-The investigation correlated multiple independent telemetry sources:
-
-**Process Tree → Logon Events → Network/RDP Events → Registry Changes → Threat Intelligence**
-
-The sequence showed:
-
-1. Remote activity involving the `administrator` account.
-2. Successful remote/network logons.
-3. An accepted inbound RDP connection to TCP port 3389.
-4. Suspicious DefenderRemover-related process activity.
-5. Execution of `regedit.exe`.
-6. Import of `RemoveDefender.reg`.
-7. Multiple Microsoft Defender protections disabled.
-8. Registry deletion activity.
-9. Threat-intelligence findings associated with one of the observed remote IP addresses.
-
-The correlation between endpoint, authentication, network, and registry telemetry increased confidence that the activity was malicious rather than an isolated administrative registry change.
+The evidence indicates that `explorer.exe` initiated `DefenderRemover.exe`, providing an important pivot from the initial alert into the endpoint execution chain.
 
 ---
 
-## Verdict
+## 4. DefenderRemover File Analysis
 
-**True Positive – Malicious Activity**
+Microsoft Defender XDR process details provided additional information about the executable.
 
-The evidence supports malicious activity involving remote access followed by attempts to weaken Microsoft Defender security controls.
+Observed details included:
 
-The available telemetry identifies the affected account as `mts\administrator`, but it does **not conclusively establish the real-world identity of the person operating the account**.
+- **Execution Time:** Sep. 9, 2026, 9:24:31 PM
+- **Command Line:** `"DefenderRemover.exe"`
+- **Path:** `C:\Users\administrator\Desktop\DefenderRemover.exe`
+- **Token Elevation:** Full
+- **Integrity Level:** High
+- **Signer:** Unknown
+- **SHA256:** `c8dfedfdb3ee6c5761ac119655d522850abd84649e13d0bf55efa8f0ad47f7d7`
 
-The remote IP addresses should therefore be documented as infrastructure associated with the observed activity rather than definitive attribution to a specific attacker.
-
----
-
-## Recommendations
-
-- Isolate the affected endpoint if this activity occurs in a production environment.
-- Reset or rotate credentials associated with the compromised administrator account.
-- Review additional authentication activity involving the administrator account.
-- Restore and verify Microsoft Defender security settings.
-- Investigate the origin and execution of `DefenderRemover.exe` and `RemoveDefender.reg`.
-- Review RDP exposure and restrict external RDP access where possible.
-- Review other systems for connections involving the identified remote IP addresses.
-- Search for similar Defender registry modifications across the environment.
-- Preserve relevant Defender XDR telemetry for further investigation.
+The elevated token and high integrity level showed that the process was executing with significant privileges.
 
 ---
 
-# Appendix – Process Analysis and Advanced Hunting
+## 5. Child-Process Analysis
 
-The detailed technical hunting was placed in this appendix so the primary investigation report remains concise while preserving the supporting evidence.
+The investigation pivoted from the suspicious execution into related process activity.
 
-## A. Logon Investigation
+Advanced Hunting showed child processes associated with `cmd.exe`, including:
 
-`DeviceLogonEvents` was used to examine authentication activity involving the administrator account.
+- `conhost.exe`
+- `choice.exe`
+- `powershell.exe`
+- `PowerRun.exe`
+- `shutdown.exe`
 
-The investigation focused on:
+### Child-Process Evidence
 
-- Timestamp
-- Account domain
-- Account name
-- Action type
-- Logon type
-- Remote IP
-- Remote device
-- Initiating process
+![Script Run child processes](images/script-run-child-processes.png)
 
-This identified the remote/network authentication activity associated with the investigation.
+The child-process activity helped reconstruct the execution chain and showed that the activity extended beyond the initial `DefenderRemover.exe` execution.
 
----
-
-## B. Network Investigation
-
-`DeviceNetworkEvents` was used to correlate the remote IP addresses with network connections involving the affected device.
-
-This identified the accepted inbound connection:
-
-`173.255.162.181 → 192.168.10.8:3389`
-
-The associated Windows service process was:
-
-`svchost.exe -k termsvcs -s TermService`
-
-This provided network-level evidence supporting the RDP activity.
+Of particular interest were PowerShell execution, `PowerRun.exe`, and the later shutdown command.
 
 ---
 
-## C. Registry Investigation
+## 6. Registry Modification Analysis
 
-`DeviceRegistryEvents` was used to identify Defender-related registry modifications.
+Registry telemetry was reviewed to determine whether the suspicious execution affected Microsoft Defender configuration.
 
-The investigation identified `regedit.exe` importing:
+Advanced Hunting identified registry deletion activity initiated by `regedit.exe`.
 
-`RemoveDefender.reg`
+The command line referenced:
 
-and setting multiple Defender security controls to `1`, indicating disabled protections.
+`Remove_defender\RemoveDefender.reg`
 
-Registry deletion events associated with the same activity were also identified.
+Registry deletion events occurred under both the `administrator` and `SYSTEM` security contexts.
 
----
+### Registry Evidence
 
-## D. IOC Enrichment
+![Registry key deletion activity](images/registry-key-deletions.png)
 
-The observed remote IP addresses were checked using external threat-intelligence and WHOIS sources.
-
-Threat-intelligence findings were used as supporting evidence only and were correlated with Defender XDR telemetry before reaching the final verdict.
+The registry telemetry strengthened the correlation between the suspicious process activity and attempts to modify security-related configuration.
 
 ---
 
-## Investigation Methodology
+## 7. Threat Intelligence – VirusTotal
 
-**Process Tree → Logs/Evidence → Advanced Hunting → Logon Correlation → Network/RDP Correlation → Registry Validation → IOC Enrichment → Verdict**
+The SHA256 hash associated with `DefenderRemover.exe` was investigated using VirusTotal:
 
-This investigation demonstrates how multiple sources of endpoint telemetry can be correlated to reconstruct suspicious activity instead of relying on a single alert or indicator.
+`c8dfedfdb3ee6c5761ac119655d522850abd84649e13d0bf55efa8f0ad47f7d7`
+
+At the time of the external lookup captured during the investigation, VirusTotal showed:
+
+**51 / 68 security vendors flagged the file as malicious.**
+
+Threat labels visible in the results included references to:
+
+- Trojan
+- Hacktool
+- PUA
+- KillAV
+- Disable Defender
+
+### VirusTotal Evidence
+
+![DefenderRemover VirusTotal results](images/defenderremover-file-details-virustotal.png)
+
+VirusTotal was used as supporting threat-intelligence evidence. The external reputation result was considered together with the endpoint, authentication, process, and registry telemetry rather than being used as the sole basis for the verdict.
 
 ---
 
-## Lab Acknowledgment
+## 8. IP Enrichment
 
-This investigation was performed in an isolated MYDFIR lab environment for cybersecurity training and portfolio development.
+WHOIS enrichment was performed on `131.109.131.82`.
+
+The lookup associated the address range with:
+
+**Rhode Island Network for Educational Technology (RINET)**
+
+This WHOIS result identifies registration information for the IP address but does not by itself establish malicious activity.
+
+The IP was therefore treated as an observed network indicator requiring correlation with the surrounding authentication and endpoint telemetry.
+
+---
+
+## 9. Investigation Timeline
+
+| Time | Observed Activity |
+|---|---|
+| ~9:20 PM | RemoteInteractive activity observed involving `mts\administrator` |
+| 9:24:29–9:24:31 PM | `DefenderRemover.exe` execution observed |
+| 9:24:31 PM | Defender process details show elevated execution |
+| ~9:24 PM | Related command, PowerShell, PowerRun, and other child-process activity observed |
+| 9:24:43 PM | Registry deletion activity observed through `regedit.exe` |
+| 9:24:44 PM | Additional registry deletion activity observed under `SYSTEM` context |
+| Later analysis | File hash investigated using VirusTotal |
+
+The timeline shows close temporal proximity between remote interactive activity, suspicious process execution, and registry modification.
+
+---
+
+## 10. Evidence Correlation
+
+The investigation used multiple independent telemetry sources rather than relying on a single alert.
+
+The evidence chain was:
+
+**Defender Alert → Logon Analysis → RemoteInteractive Activity → Process Analysis → DefenderRemover Execution → Child Processes → Registry Activity → IOC Enrichment → Verdict**
+
+This correlation was important because each source answered a different investigative question:
+
+- **Alert telemetry** identified the suspicious behavior.
+- **Authentication telemetry** showed activity involving the affected account.
+- **Process telemetry** identified the suspicious executable and execution context.
+- **Child-process telemetry** helped reconstruct subsequent activity.
+- **Registry telemetry** showed configuration-related changes.
+- **Threat intelligence** provided additional reputation context for the executable.
+
+---
+
+## 11. MITRE ATT&CK Mapping
+
+Based on the observed behavior, the investigation is consistent with the following MITRE ATT&CK concepts:
+
+| Technique | Description | Evidence |
+|---|---|---|
+| **T1562.001 – Impair Defenses: Disable or Modify Tools** | Activity attempted to interfere with Microsoft Defender protections | Defender alert, DefenderRemover activity, registry evidence |
+| **T1021.001 – Remote Services: Remote Desktop Protocol** | RemoteInteractive activity was observed during the investigation | Logon telemetry |
+| **T1059.001 – Command and Scripting Interpreter: PowerShell** | `powershell.exe` appeared in related child-process telemetry | Process hunting |
+| **T1112 – Modify Registry** | Registry activity involving `regedit.exe` and `RemoveDefender.reg` was observed | Registry telemetry |
+
+The mappings describe behaviors observed during the investigation and should be interpreted in the context of the complete evidence chain.
+
+---
+
+## 12. Indicators and Artifacts
+
+| Type | Value |
+|---|---|
+| Device | `mts-dc.mts.local` |
+| Account | `mts\administrator` |
+| File | `DefenderRemover.exe` |
+| SHA256 | `c8dfedfdb3ee6c5761ac119655d522850abd84649e13d0bf55efa8f0ad47f7d7` |
+| Registry Artifact | `RemoveDefender.reg` |
+| Observed Remote IP | `131.109.131.82` |
+| Observed Remote IP | `173.255.162.181` |
+
+These values are investigation artifacts. An observed indicator should not automatically be treated as malicious without supporting correlation.
+
+---
+
+## 13. Verdict
+
+### True Positive – Malicious Activity
+
+The investigation identified multiple correlated behaviors consistent with an attempt to impair Microsoft Defender protections.
+
+The verdict was supported by the combination of:
+
+- Defender alerts related to disabling antivirus protection
+- RemoteInteractive authentication activity
+- Execution of `DefenderRemover.exe`
+- Elevated process execution
+- Related command and PowerShell activity
+- Registry deletion activity involving `RemoveDefender.reg`
+- Strong external reputation evidence associated with the DefenderRemover file hash
+
+The combined telemetry provided substantially stronger evidence than any individual event considered alone.
+
+---
+
+## 14. Recommended Response Actions
+
+For a production environment, appropriate response actions would include:
+
+1. Isolate the affected endpoint.
+2. Investigate and contain the affected administrator account.
+3. Validate Microsoft Defender configuration and restore any protections that were modified or disabled.
+4. Remove or quarantine confirmed malicious files.
+5. Review remote authentication activity associated with the affected account.
+6. Hunt across the environment for the identified file hash and related artifacts.
+7. Review registry modifications associated with the activity.
+8. Reset or rotate affected credentials when compromise is confirmed.
+9. Continue monitoring for recurrence or related activity.
+
+---
+
+## 15. Lessons Learned
+
+This investigation reinforced the importance of following evidence across multiple telemetry sources instead of stopping after reviewing the original alert.
+
+The most valuable part of the investigation was correlating authentication activity with endpoint process and registry telemetry. Advanced Hunting helped reconstruct the sequence of events and determine how the individual activities related to one another.
+
+It also demonstrated why threat-intelligence results such as VirusTotal and WHOIS should be treated as supporting context rather than standalone proof.
+
+---
+
+## Investigation Environment
+
+This investigation was performed in an **isolated MYDFIR cybersecurity lab environment** for educational and portfolio purposes.
+
+The investigation was conducted using Microsoft Defender XDR and Advanced Hunting as part of hands-on SOC analyst training.
+
+No production organization or live customer environment was involved.
