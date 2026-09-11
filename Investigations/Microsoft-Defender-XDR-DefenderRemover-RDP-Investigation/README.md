@@ -177,7 +177,7 @@ The IP address `131.109.131.82`, identified during the authentication review, wa
 
 At the time of analysis, **7 of 89 security vendors flagged the IP address as malicious**. Several vendors categorized the address as malicious, phishing-related, or associated with malware activity.
 
-![VirusTotal IP reputation for 131.109.131.82](images/virustotal-ip-131.109.131.82.png)
+![VirusTotal IP reputation for 131.109.131.82](images/Screenshot%202026-09-11%20182222.png)
 
 This reputation result was treated as supporting threat-intelligence evidence and was correlated with the authentication and endpoint activity observed during the investigation.
 
