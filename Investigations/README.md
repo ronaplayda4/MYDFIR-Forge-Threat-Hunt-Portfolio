@@ -262,3 +262,39 @@ c8dfedfdb3ee6c5761ac119655d522850abd84649e13d0bf55efa8f0ad4f7fd7
 **Process Tree → Logs/Evidence → Identify Pivots → Advanced Hunting → Process Correlation → Logon Correlation → Network/RDP Correlation → Registry Validation → IOC Enrichment → Verdict**
 
 This structure preserves the technical evidence while keeping the primary incident report concise and readable.
+
+### Additional Supporting Evidence
+
+The following screenshots are retained as additional evidence so a reviewer can independently follow the pivots made during the investigation.
+
+#### DefenderRemover launched from Explorer
+
+![DefenderRemover launched from Explorer](images/defenderremover-explorer-process.png)
+
+This event shows `DefenderRemover.exe` executing under the `administrator` account with `explorer.exe` as the initiating process. This helped establish the beginning of the suspicious execution chain.
+
+#### Script_Run child-process activity
+
+![Script Run child processes](images/script-run-child-processes.png)
+
+Advanced Hunting identified multiple child processes tied to `cmd.exe /c .\\Script_Run.bat`, including PowerShell, `PowerRun.exe`, and `shutdown.exe`. This correlated the batch script with the later Defender-tampering activity.
+
+#### DefenderRemover file details and reputation
+
+![DefenderRemover file details](images/defenderremover-file-details-virustotal.png)
+
+The process details show the executable path, hashes, unknown signer status, elevated execution context, and the Defender portal's VirusTotal detection ratio. These attributes strengthened the case that the executable required further investigation.
+
+#### Registry key deletions associated with RemoveDefender.reg
+
+![Registry key deletions](images/registry-key-deletions.png)
+
+Registry hunting showed `regedit.exe` importing `RemoveDefender.reg` and performing registry deletions under both administrator and SYSTEM contexts. This supplements the Defender policy-value modifications documented above.
+
+#### RemoteInteractive administrator logons
+
+![RDP RemoteInteractive logons](images/rdp-remoteinteractive-logons.png)
+
+Logon telemetry shows repeated `RemoteInteractive` activity for the `MTS\\administrator` account associated with remote IP `173.255.162.181`. This was correlated with the network evidence showing inbound TCP/3389 activity to the domain controller.
+
+> **Analyst note:** WHOIS and VirusTotal enrichment provide infrastructure and reputation context; they do not by themselves identify the human operator behind an IP address.
