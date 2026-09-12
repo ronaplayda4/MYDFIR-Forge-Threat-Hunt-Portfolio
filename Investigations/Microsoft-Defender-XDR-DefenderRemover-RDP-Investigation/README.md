@@ -147,11 +147,11 @@ The registry telemetry strengthened the correlation between the suspicious proce
 
 The SHA256 hash associated with `DefenderRemover.exe` was investigated using VirusTotal:
 
-`c8dfedfdb3ee6c5761ac119655d522850abd84649e13d0bf55efa8f0ad47f7d7`
+`c8dfedfdb3ee6c5761ac119655d522850abd84649e13d0bf55efa8f0ad4f7fd7`
 
 At the time of the external lookup captured during the investigation, VirusTotal showed:
 
-**51 / 68 security vendors flagged the file as malicious.**
+**45 / 63 security vendors flagged the file as malicious.**
 
 Threat labels visible in the results included references to:
 
@@ -163,7 +163,7 @@ Threat labels visible in the results included references to:
 
 ### VirusTotal Evidence
 
-![DefenderRemover VirusTotal results](images/defenderremover-file-details-virustotal.png)
+![DefenderRemover VirusTotal results]![VirusTotal Detections](assets/virustotal_45.png)
 
 VirusTotal was used as supporting threat-intelligence evidence. The external reputation result was considered together with the endpoint, authentication, process, and registry telemetry rather than being used as the sole basis for the verdict.
 
