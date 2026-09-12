@@ -163,7 +163,7 @@ Threat labels visible in the results included references to:
 
 ### VirusTotal Evidence
 
-![VirusTotal Detections](assets/virustotal_45.png)
+![VirusTotal Detections](virustotal.png)
 
 VirusTotal was used as supporting threat-intelligence evidence. The external reputation result was considered together with the endpoint, authentication, process, and registry telemetry rather than being used as the sole basis for the verdict.
 
